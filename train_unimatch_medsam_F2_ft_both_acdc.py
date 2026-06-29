@@ -373,10 +373,8 @@ def train(args, snapshot_path):
             total_mask_ratio.update(mask_ratio.item())
             
             iters = epoch_num * len(trainloader_u) + i
-            lr = args.base_lr * (1 - iters / max_iterations) ** 0.9
-            optimizer.param_groups[0]["lr"] = lr
-            # update learning rate
-            lr_ = base_lr * (1.0 - iter_num / max_iterations) ** 0.9
+            lr_factor = max(0.0, 1.0 - iter_num / max_iterations)
+            lr_ = base_lr * (lr_factor ** 0.9)
             for param_group in optimizer.param_groups:
                 param_group["lr"] = lr_
 

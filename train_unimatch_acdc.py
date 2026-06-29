@@ -142,18 +142,18 @@ def train(args, snapshot_path):
 
     trainsampler_l = torch.utils.data.RandomSampler(trainset_l, replacement=False, num_samples=None)
     trainloader_l = DataLoader(trainset_l, batch_size=args.batch_size,
-                               pin_memory=True, num_workers=0, drop_last=True, sampler=trainsampler_l)
+                               pin_memory=True, num_workers=8, drop_last=True, sampler=trainsampler_l)
 
     trainsampler_u = torch.utils.data.RandomSampler(trainset_u)
     trainloader_u = DataLoader(trainset_u, batch_size=args.batch_size,
-                               pin_memory=True, num_workers=0, drop_last=True, sampler=trainsampler_u)
+                               pin_memory=True, num_workers=8, drop_last=True, sampler=trainsampler_u)
 
     trainsampler_u_mix = torch.utils.data.RandomSampler(trainset_u)
     trainloader_u_mix = DataLoader(trainset_u, batch_size=args.batch_size,
-                                   pin_memory=True, num_workers=0, drop_last=True, sampler=trainsampler_u_mix)
+                                   pin_memory=True, num_workers=8, drop_last=True, sampler=trainsampler_u_mix)
 
     valsampler = torch.utils.data.RandomSampler(valset)
-    valloader = DataLoader(valset, batch_size=1, pin_memory=True, num_workers=0,
+    valloader = DataLoader(valset, batch_size=1, pin_memory=True, num_workers=2,
                            drop_last=False, sampler=valsampler)
     # set to train
     model.to(args.cuda_num)
@@ -250,10 +250,9 @@ def train(args, snapshot_path):
             total_mask_ratio.update(mask_ratio.item())
             
             iters = epoch_num * len(trainloader_u) + i
-            lr = args.base_lr * (1 - iters / max_iterations) ** 0.9
-            optimizer.param_groups[0]["lr"] = lr
-            # update learning rate
-            lr_ = base_lr * (1.0 - iter_num / max_iterations) ** 0.9
+            # update learning rate safely; avoid complex lr when iter_num exceeds max_iterations
+            lr_factor = max(0.0, 1.0 - iter_num / max_iterations)
+            lr_ = base_lr * (lr_factor ** 0.9)
             for param_group in optimizer.param_groups:
                 param_group["lr"] = lr_
 

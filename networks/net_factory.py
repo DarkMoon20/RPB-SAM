@@ -31,7 +31,7 @@ parser.add_argument('--seed', type=int,  default=1337, help='random seed')
 parser.add_argument('--num_classes', type=int,  default=4,
                     help='output channel of network')
 parser.add_argument(
-    '--cfg', type=str, default="/data/maia/gpxu/proj1/samatch/code/configs/swin_tiny_patch4_window7_224_lite.yaml", help='path to config file', )
+    '--cfg', type=str, default="./code/configs/swin_tiny_patch4_window7_224_lite.yaml", help='path to config file', )
 parser.add_argument(
     "--opts",
     help="Modify config options by adding 'KEY VALUE' pairs. ",
@@ -70,7 +70,7 @@ parser.add_argument('--consistency', type=float,
                     default=0.1, help='consistency')
 parser.add_argument('--consistency_rampup', type=float,
                     default=200.0, help='consistency_rampup')
-args = parser.parse_args()
+args, _ = parser.parse_known_args()
 config = get_config(args)
 
 

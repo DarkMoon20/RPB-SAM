@@ -1,0 +1,11 @@
+checkpoint/
+data/
+run_logs/
+__pycache__/
+*.pyc
+*.pth
+*.pt
+*.nii
+*.nii.gz
+*.h5
+*.log

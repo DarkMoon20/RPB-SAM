@@ -39,7 +39,6 @@ from dataloaders.dataset_acdc import (
     TwoStreamBatchSampler,
     WeakStrongAugment,
 )
-from networks.net_factory import net_factory
 from utils import losses, metrics, ramps, util
 from val_2D import test_single_volume
 ### medsam
