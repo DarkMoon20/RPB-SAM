@@ -77,6 +77,11 @@ parser.add_argument("--patch_size", type=int, default=256, help="patch size of n
 parser.add_argument("--seed", type=int, default=1337, help="random seed")
 parser.add_argument("--num_classes", type=int, default=4, help="output channel of network")
 parser.add_argument("--load", default=False, action="store_true", help="restore previous checkpoint")
+parser.add_argument("--use_reliability_gate", default=False, action="store_true", help="filter MedSAM pseudo labels before using them")
+parser.add_argument("--gate_iou_thresh", type=float, default=0.5, help="minimum IoU between teacher and MedSAM masks")
+parser.add_argument("--gate_area_min", type=float, default=0.5, help="minimum MedSAM/teacher area ratio")
+parser.add_argument("--gate_area_max", type=float, default=2.0, help="maximum MedSAM/teacher area ratio")
+parser.add_argument("--gate_min_area", type=float, default=10.0, help="minimum foreground area for a valid class mask")
 
 # cost
 parser.add_argument("--ema_decay", type=float, default=0.99, help="ema_decay")
@@ -133,6 +138,39 @@ def load_match(ckpt_match, model):
 def resize_pred(pred, size=(128, 128), mode = InterpolationMode.NEAREST):
     pred = TF.resize(pred, size, mode)
     return pred
+
+
+def reliability_gate_pseudo_label(mask_teacher, mask_sam, num_classes,
+                                  iou_thresh=0.5, area_min=0.5,
+                                  area_max=2.0, min_area=10.0):
+    final_mask = mask_teacher.clone()
+    accepted = torch.zeros(
+        (mask_teacher.shape[0], num_classes - 1),
+        dtype=torch.bool,
+        device=mask_teacher.device,
+    )
+
+    for b in range(mask_teacher.shape[0]):
+        for cls in range(1, num_classes):
+            teacher_cls = mask_teacher[b] == cls
+            sam_cls = mask_sam[b] == cls
+            teacher_area = teacher_cls.sum().float()
+            sam_area = sam_cls.sum().float()
+
+            if teacher_area < min_area or sam_area < min_area:
+                continue
+
+            inter = torch.logical_and(teacher_cls, sam_cls).sum().float()
+            union = torch.logical_or(teacher_cls, sam_cls).sum().float()
+            iou = inter / (union + 1e-6)
+            area_ratio = sam_area / (teacher_area + 1e-6)
+
+            if iou >= iou_thresh and area_min <= area_ratio <= area_max:
+                accepted[b, cls - 1] = True
+                final_mask[b][final_mask[b] == cls] = 0
+                final_mask[b][sam_cls] = cls
+
+    return final_mask, accepted.float().mean()
 
 #####################################
 def train(args, snapshot_path):
@@ -315,6 +353,19 @@ def train(args, snapshot_path):
             # medsam_logit_all[:, 0, :, :] = (1 - torch.mean(medsam_logit_all[:, 1:, :, :], dim=1, keepdim=True)).squeeze(1) # for the background
             pred_w_sam = a_tmp.softmax(dim=1)
             mask_u_w_sam = pred_w_sam.argmax(dim=1)
+            if args.use_reliability_gate:
+                mask_u_w_final, gate_accept_ratio = reliability_gate_pseudo_label(
+                    mask_u_w,
+                    mask_u_w_sam,
+                    num_classes,
+                    iou_thresh=args.gate_iou_thresh,
+                    area_min=args.gate_area_min,
+                    area_max=args.gate_area_max,
+                    min_area=args.gate_min_area,
+                )
+            else:
+                mask_u_w_final = mask_u_w_sam
+                gate_accept_ratio = torch.tensor(1.0, device=mask_u_w.device)
 
             # labeled loss from sam
             # pred_x_sam: Bx2xHxW, mask_x: BxHxW
@@ -333,8 +384,8 @@ def train(args, snapshot_path):
             ## loss for unimatch
             # conf_u_w_sam = resize_pred(pred_sam_pos[num_lb:,::], size=(256, 256), mode=InterpolationMode.BILINEAR)
             # conf_u_w_sam = conf_u_w_sam.squeeze(1)
-            mask_u_w_cutmixed1, conf_u_w_cutmixed1 = mask_u_w_sam.clone(), conf_u_w.clone()
-            mask_u_w_cutmixed2, conf_u_w_cutmixed2 = mask_u_w_sam.clone(), conf_u_w.clone()
+            mask_u_w_cutmixed1, conf_u_w_cutmixed1 = mask_u_w_final.clone(), conf_u_w.clone()
+            mask_u_w_cutmixed2, conf_u_w_cutmixed2 = mask_u_w_final.clone(), conf_u_w.clone()
 
             mask_u_w_cutmixed1[cutmix_box1 == 1] = mask_u_w_mix[cutmix_box1 == 1]
             conf_u_w_cutmixed1[cutmix_box1 == 1] = conf_u_w_mix[cutmix_box1 == 1]
@@ -356,7 +407,7 @@ def train(args, snapshot_path):
                                     ignore=(conf_u_w_cutmixed2 < args.conf_thresh).float())
             
             loss_u_w_fp = dice_loss(pred_u_w_fp.softmax(dim=1), 
-                                    mask_u_w_sam.unsqueeze(1).float(),
+                                    mask_u_w_final.unsqueeze(1).float(),
                                         ignore=(conf_u_w < args.conf_thresh).float())
             
             loss = (loss_x + loss_u_s1 * 0.25 + loss_u_s2 * 0.25 + loss_u_w_fp * 0.5) / 2.0
@@ -385,12 +436,14 @@ def train(args, snapshot_path):
             writer.add_scalar('train/loss_s', (loss_u_s1.item() + loss_u_s2.item()) / 2.0, iters)
             writer.add_scalar('train/loss_w_fp', loss_u_w_fp.item(), iters)
             writer.add_scalar('train/mask_ratio', mask_ratio, iters)
+            writer.add_scalar('train/gate_accept_ratio', gate_accept_ratio.item(), iters)
             logging.info("iteration %d : model loss : %f" % (iter_num, loss.item()))
 
             if (i % (len(trainloader_u) // 8) == 0):
                 logging.info('Iters: {:}, Total loss: {:.3f}, Loss x: {:.3f}, Loss s: {:.3f}, Loss w_fp: {:.3f}, Mask ratio: '
-                            '{:.3f}'.format(i, total_loss.avg, total_loss_x.avg, total_loss_s.avg, 
-                                            total_loss_w_fp.avg, total_mask_ratio.avg))
+                            '{:.3f}, Gate accept: {:.3f}'.format(i, total_loss.avg, total_loss_x.avg, total_loss_s.avg,
+                                                                 total_loss_w_fp.avg, total_mask_ratio.avg,
+                                                                 gate_accept_ratio.item()))
         
         # # complete an epoch, update lr_sam
         # epoch_loss_reduced = sum(epoch_loss) / len(epoch_loss)
