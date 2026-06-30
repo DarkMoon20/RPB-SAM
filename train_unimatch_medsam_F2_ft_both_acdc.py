@@ -82,6 +82,7 @@ parser.add_argument("--gate_iou_thresh", type=float, default=0.5, help="minimum 
 parser.add_argument("--gate_area_min", type=float, default=0.5, help="minimum MedSAM/teacher area ratio")
 parser.add_argument("--gate_area_max", type=float, default=2.0, help="maximum MedSAM/teacher area ratio")
 parser.add_argument("--gate_min_area", type=float, default=10.0, help="minimum foreground area for a valid class mask")
+parser.add_argument("--gate_mode", type=str, default="class", choices=["class", "sample"], help="reliability gate fallback granularity")
 
 # cost
 parser.add_argument("--ema_decay", type=float, default=0.99, help="ema_decay")
@@ -169,6 +170,44 @@ def reliability_gate_pseudo_label(mask_teacher, mask_sam, num_classes,
                 accepted[b, cls - 1] = True
                 final_mask[b][final_mask[b] == cls] = 0
                 final_mask[b][sam_cls] = cls
+
+    return final_mask, accepted.float().mean()
+
+
+def reliability_gate_sample(mask_teacher, mask_sam, num_classes,
+                            iou_thresh=0.5, area_min=0.5,
+                            area_max=2.0, min_area=10.0):
+    final_mask = mask_teacher.clone()
+    accepted = torch.zeros(mask_teacher.shape[0], dtype=torch.bool, device=mask_teacher.device)
+
+    for b in range(mask_teacher.shape[0]):
+        valid_classes = 0
+        passed_classes = 0
+
+        for cls in range(1, num_classes):
+            teacher_cls = mask_teacher[b] == cls
+            sam_cls = mask_sam[b] == cls
+            teacher_area = teacher_cls.sum().float()
+            sam_area = sam_cls.sum().float()
+
+            if teacher_area < min_area:
+                continue
+
+            valid_classes += 1
+            if sam_area < min_area:
+                continue
+
+            inter = torch.logical_and(teacher_cls, sam_cls).sum().float()
+            union = torch.logical_or(teacher_cls, sam_cls).sum().float()
+            iou = inter / (union + 1e-6)
+            area_ratio = sam_area / (teacher_area + 1e-6)
+
+            if iou >= iou_thresh and area_min <= area_ratio <= area_max:
+                passed_classes += 1
+
+        if valid_classes > 0 and passed_classes == valid_classes:
+            accepted[b] = True
+            final_mask[b] = mask_sam[b]
 
     return final_mask, accepted.float().mean()
 
@@ -354,7 +393,8 @@ def train(args, snapshot_path):
             pred_w_sam = a_tmp.softmax(dim=1)
             mask_u_w_sam = pred_w_sam.argmax(dim=1)
             if args.use_reliability_gate:
-                mask_u_w_final, gate_accept_ratio = reliability_gate_pseudo_label(
+                gate_fn = reliability_gate_sample if args.gate_mode == "sample" else reliability_gate_pseudo_label
+                mask_u_w_final, gate_accept_ratio = gate_fn(
                     mask_u_w,
                     mask_u_w_sam,
                     num_classes,
