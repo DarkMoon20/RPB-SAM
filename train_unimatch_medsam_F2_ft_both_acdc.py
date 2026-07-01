@@ -77,6 +77,7 @@ parser.add_argument("--patch_size", type=int, default=256, help="patch size of n
 parser.add_argument("--seed", type=int, default=1337, help="random seed")
 parser.add_argument("--num_classes", type=int, default=4, help="output channel of network")
 parser.add_argument("--load", default=False, action="store_true", help="restore previous checkpoint")
+parser.add_argument("--disable_sam_refine", default=False, action="store_true", help="use UniMatch pseudo labels directly for unlabeled loss")
 parser.add_argument("--use_reliability_gate", default=False, action="store_true", help="filter MedSAM pseudo labels before using them")
 parser.add_argument("--gate_iou_thresh", type=float, default=0.5, help="minimum IoU between teacher and MedSAM masks")
 parser.add_argument("--gate_area_min", type=float, default=0.5, help="minimum MedSAM/teacher area ratio")
@@ -392,7 +393,10 @@ def train(args, snapshot_path):
             # medsam_logit_all[:, 0, :, :] = (1 - torch.mean(medsam_logit_all[:, 1:, :, :], dim=1, keepdim=True)).squeeze(1) # for the background
             pred_w_sam = a_tmp.softmax(dim=1)
             mask_u_w_sam = pred_w_sam.argmax(dim=1)
-            if args.use_reliability_gate:
+            if args.disable_sam_refine:
+                mask_u_w_final = mask_u_w
+                gate_accept_ratio = torch.tensor(0.0, device=mask_u_w.device)
+            elif args.use_reliability_gate:
                 gate_fn = reliability_gate_sample if args.gate_mode == "sample" else reliability_gate_pseudo_label
                 mask_u_w_final, gate_accept_ratio = gate_fn(
                     mask_u_w,
@@ -484,6 +488,9 @@ def train(args, snapshot_path):
                             '{:.3f}, Gate accept: {:.3f}'.format(i, total_loss.avg, total_loss_x.avg, total_loss_s.avg,
                                                                  total_loss_w_fp.avg, total_mask_ratio.avg,
                                                                  gate_accept_ratio.item()))
+
+            if iter_num >= max_iterations:
+                break
         
         # # complete an epoch, update lr_sam
         # epoch_loss_reduced = sum(epoch_loss) / len(epoch_loss)
@@ -543,6 +550,10 @@ def train(args, snapshot_path):
                 if mean_dice > 0.1: 
                     torch.save(checkpoint, os.path.join(snapshot_path, 
                                     "iter_"+str(iter_num)+"_dice_"+str(round(mean_dice,3))+'.pth'))
+
+        if iter_num >= max_iterations:
+            iterator.close()
+            break
 
 
 if __name__ == "__main__":

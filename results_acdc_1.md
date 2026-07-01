@@ -40,3 +40,4 @@ Current observation:
 - On ACDC 0_5 labeled, sample-level loose gate gives the best overall result.
 - On ACDC 1 labeled, SAMatch keeps the best Mean Dice, while class-wise loose gate improves HD95.
 - The reliability gate appears most beneficial in the lower-label regime.
+- For ACDC 1 labeled, gate variants are treated as ablations rather than the selected main result.
