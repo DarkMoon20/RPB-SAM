@@ -59,3 +59,13 @@ Sample-level gate ablation:
 - Strict gate is too conservative and drops Mean Dice to `0.7974`.
 - Medium gate recovers Dice to `0.8352`, but HD95 and ASD remain worse than loose gate.
 - Loose gate gives the best overall balance: `0.8390` Dice, `3.023` HD95, and `1.004` ASD.
+
+Sample-level gate accept ratio:
+
+| Gate Setting | Avg Accept | Reject Steps | Reject Ratio |
+|---|---:|---:|---:|
+| Strict | 0.609 | 81/128 | 0.633 |
+| Medium | 0.812 | 41/128 | 0.320 |
+| Loose | 0.883 | 26/128 | 0.203 |
+
+The loose gate still filters unreliable MedSAM refinements, but it avoids the over-filtering behavior of the strict setting.

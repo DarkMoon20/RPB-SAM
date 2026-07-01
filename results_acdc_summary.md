@@ -28,16 +28,16 @@ Experiment setting:
 
 ## 0_5 Gate Ablation
 
-| Method | Gate Mode | IoU Threshold | Area Ratio | Mean Dice | Mean HD95 | Mean ASD |
-|---|---|---:|---|---:|---:|---:|
-| No SAM Refinement | none | - | - | 0.6395 | 21.839 | 7.684 |
-| SAMatch | none | - | - | 0.8148 | 4.592 | 1.313 |
-| Gate v1 | class | 0.5 | 0.5-2.0 | 0.7990 | 5.292 | 1.424 |
-| Medium Gate | class | 0.4 | 0.3-3.0 | 0.8212 | 4.670 | 1.470 |
-| Class-wise Loose Gate | class | 0.3 | 0.2-5.0 | 0.8387 | 3.274 | 1.102 |
-| Sample-level Strict Gate | sample | 0.5 | 0.5-2.0 | 0.7974 | 4.501 | 1.442 |
-| Sample-level Medium Gate | sample | 0.4 | 0.3-3.0 | 0.8352 | 5.268 | 1.481 |
-| **Sample-level Loose Gate** | sample | 0.3 | 0.2-5.0 | **0.8390** | **3.023** | **1.004** |
+| Method | Gate Mode | IoU Threshold | Area Ratio | Mean Dice | Mean HD95 | Mean ASD | Avg Accept | Reject Steps |
+|---|---|---:|---|---:|---:|---:|---:|---:|
+| No SAM Refinement | none | - | - | 0.6395 | 21.839 | 7.684 | - | - |
+| SAMatch | none | - | - | 0.8148 | 4.592 | 1.313 | 1.000 | 0/128 |
+| Gate v1 | class | 0.5 | 0.5-2.0 | 0.7990 | 5.292 | 1.424 | - | - |
+| Medium Gate | class | 0.4 | 0.3-3.0 | 0.8212 | 4.670 | 1.470 | - | - |
+| Class-wise Loose Gate | class | 0.3 | 0.2-5.0 | 0.8387 | 3.274 | 1.102 | - | - |
+| Sample-level Strict Gate | sample | 0.5 | 0.5-2.0 | 0.7974 | 4.501 | 1.442 | 0.609 | 81/128 |
+| Sample-level Medium Gate | sample | 0.4 | 0.3-3.0 | 0.8352 | 5.268 | 1.481 | 0.812 | 41/128 |
+| **Sample-level Loose Gate** | sample | 0.3 | 0.2-5.0 | **0.8390** | **3.023** | **1.004** | **0.883** | **26/128** |
 
 ## Per-Class Best Results
 
@@ -50,6 +50,8 @@ Experiment setting:
 ## Current Interpretation
 
 The reliability gate is most effective in the extremely low-label regime. On ACDC 0_5 labeled, the No SAM Refinement ablation drops to `0.6395` Mean Dice, showing that the improvement is not caused by simply continuing training in the SAMatch framework. MedSAM-refined pseudo labels are necessary, but they can also introduce unreliable refinements. The sample-level loose gate filters these cases by checking agreement and area consistency between the UniMatch pseudo label and the MedSAM refined mask, giving the best Dice, HD95, and ASD.
+
+The sample-level gate threshold controls how often SAM refinement is accepted. Strict gate accepts only `60.9%` of logged samples and drops Mean Dice to `0.7974`, indicating over-filtering. Medium gate accepts `81.2%` and recovers Dice to `0.8352`, but boundary metrics remain unstable. Loose gate accepts `88.3%` while still rejecting 26 of 128 logged steps, giving the best balance between using useful MedSAM refinements and filtering unreliable ones.
 
 At 1 labeled, SAMatch keeps the best Dice and ASD, while class-wise loose gate improves HD95 slightly. At 3 labeled, SAMatch is already strong and the gate does not improve the boundary metrics. Sample-level loose gate also drops to `0.8450` Mean Dice at 3 labeled. This supports positioning the gate as a low-label reliability mechanism rather than a universally beneficial replacement for SAMatch refinement.
 
