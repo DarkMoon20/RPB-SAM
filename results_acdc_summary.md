@@ -39,6 +39,16 @@ Experiment setting:
 | Sample-level Medium Gate | sample | 0.4 | 0.3-3.0 | 0.8352 | 5.268 | 1.481 | 0.812 | 41/128 |
 | **Sample-level Loose Gate** | sample | 0.3 | 0.2-5.0 | **0.8390** | **3.023** | **1.004** | **0.883** | **26/128** |
 
+## 0_5 Confidence Prompt Ablation
+
+| Method | Prompt Conf | Reliability Gate | Mean Dice | Mean HD95 | Mean ASD | Conclusion |
+|---|---:|---|---:|---:|---:|---|
+| SAMatch | - | no | 0.8148 | 4.592 | 1.313 | Baseline SAM refinement |
+| Ours: Sample-level Loose Gate | - | yes | **0.8390** | **3.023** | **1.004** | Selected method |
+| Confidence Prompt Only | 0.90 | no | 0.7904 | 5.343 | 1.308 | Worse than SAMatch |
+| Confidence Prompt + Gate | 0.90 | yes | 0.7736 | 7.047 | 1.998 | Worse than gate only |
+| Confidence Prompt + Gate | 0.95 | yes | 0.4346 | 13356.204 | 13340.792 | Collapsed; threshold too strict |
+
 ## Per-Class Best Results
 
 | Labeled Split | Method | RV Dice | RV HD95 | RV ASD | MYO Dice | MYO HD95 | MYO ASD | LV Dice | LV HD95 | LV ASD |
@@ -54,6 +64,8 @@ The reliability gate is most effective in the extremely low-label regime. On ACD
 The sample-level gate threshold controls how often SAM refinement is accepted. Strict gate accepts only `60.9%` of logged samples and drops Mean Dice to `0.7974`, indicating over-filtering. Medium gate accepts `81.2%` and recovers Dice to `0.8352`, but boundary metrics remain unstable. Loose gate accepts `88.3%` while still rejecting 26 of 128 logged steps, giving the best balance between using useful MedSAM refinements and filtering unreliable ones.
 
 At 1 labeled, SAMatch keeps the best Dice and ASD, while class-wise loose gate improves HD95 slightly. At 3 labeled, SAMatch is already strong and the gate does not improve the boundary metrics. Sample-level loose gate also drops to `0.8450` Mean Dice at 3 labeled. This supports positioning the gate as a low-label reliability mechanism rather than a universally beneficial replacement for SAMatch refinement.
+
+Confidence-aware prompt is not selected as part of the final method. With `prompt_conf_thresh=0.90`, it underperforms both SAMatch and gate-only Ours. With `prompt_conf_thresh=0.95`, the prompt becomes too strict and causes severe degradation. This suggests that filtering prompt masks by confidence can remove useful spatial support and make MedSAM box prompts unstable in ACDC 0_5.
 
 ## Official Result Choice
 

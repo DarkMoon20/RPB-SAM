@@ -78,6 +78,9 @@ parser.add_argument("--seed", type=int, default=1337, help="random seed")
 parser.add_argument("--num_classes", type=int, default=4, help="output channel of network")
 parser.add_argument("--load", default=False, action="store_true", help="restore previous checkpoint")
 parser.add_argument("--disable_sam_refine", default=False, action="store_true", help="use UniMatch pseudo labels directly for unlabeled loss")
+parser.add_argument("--use_confidence_prompt", default=False, action="store_true", help="generate MedSAM boxes from high-confidence pseudo-label regions")
+parser.add_argument("--prompt_conf_thresh", type=float, default=0.90, help="confidence threshold for confidence-aware prompt masks")
+parser.add_argument("--prompt_min_area", type=float, default=10.0, help="minimum high-confidence area before falling back to the original pseudo mask")
 parser.add_argument("--use_reliability_gate", default=False, action="store_true", help="filter MedSAM pseudo labels before using them")
 parser.add_argument("--gate_iou_thresh", type=float, default=0.5, help="minimum IoU between teacher and MedSAM masks")
 parser.add_argument("--gate_area_min", type=float, default=0.5, help="minimum MedSAM/teacher area ratio")
@@ -140,6 +143,20 @@ def load_match(ckpt_match, model):
 def resize_pred(pred, size=(128, 128), mode = InterpolationMode.NEAREST):
     pred = TF.resize(pred, size, mode)
     return pred
+
+
+def get_prompt_mask(mask, conf, cls, conf_thresh, min_area):
+    base_mask = mask == cls
+    prompt_mask = base_mask & (conf >= conf_thresh)
+    if min_area <= 0:
+        return prompt_mask
+
+    prompt_mask = prompt_mask.clone()
+    prompt_area = prompt_mask.flatten(1).sum(dim=1)
+    fallback = prompt_area < min_area
+    if fallback.any():
+        prompt_mask[fallback] = base_mask[fallback]
+    return prompt_mask
 
 
 def reliability_gate_pseudo_label(mask_teacher, mask_sam, num_classes,
@@ -378,12 +395,21 @@ def train(args, snapshot_path):
             # a_tmp = torch.cat((map_cls0, medsam_logit_all), dim=1)
             
             ## do three times
-            ## prediction 
-            img_pd_bbox = get_bbox256_cv(mask_u_w==1, bbox_shift=args.bbox_shift)
+            ## prediction
+            if args.use_confidence_prompt:
+                prompt_mask_1 = get_prompt_mask(mask_u_w, conf_u_w, 1, args.prompt_conf_thresh, args.prompt_min_area)
+                prompt_mask_2 = get_prompt_mask(mask_u_w, conf_u_w, 2, args.prompt_conf_thresh, args.prompt_min_area)
+                prompt_mask_3 = get_prompt_mask(mask_u_w, conf_u_w, 3, args.prompt_conf_thresh, args.prompt_min_area)
+            else:
+                prompt_mask_1 = mask_u_w == 1
+                prompt_mask_2 = mask_u_w == 2
+                prompt_mask_3 = mask_u_w == 3
+
+            img_pd_bbox = get_bbox256_cv(prompt_mask_1, bbox_shift=args.bbox_shift)
             medsam_logit_1, _ = sam(img_u_w_3ch, img_pd_bbox)
-            img_pd_bbox = get_bbox256_cv(mask_u_w==2, bbox_shift=args.bbox_shift)
+            img_pd_bbox = get_bbox256_cv(prompt_mask_2, bbox_shift=args.bbox_shift)
             medsam_logit_2, _ = sam(img_u_w_3ch, img_pd_bbox)
-            img_pd_bbox = get_bbox256_cv(mask_u_w==3, bbox_shift=args.bbox_shift)
+            img_pd_bbox = get_bbox256_cv(prompt_mask_3, bbox_shift=args.bbox_shift)
             medsam_logit_3, _ = sam(img_u_w_3ch, img_pd_bbox)
 
             medsam_logit_0 = 1 - (medsam_logit_1 + medsam_logit_2 + medsam_logit_3)/3.0
